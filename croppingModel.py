@@ -63,7 +63,7 @@ class mobilenetv2_base(nn.Module):
         model = MobileNetV2(width_mult=1.0)
 
         if loadweights:
-            model.load_state_dict(torch.load(model_path))
+            model.load_state_dict(torch.load(model_path, map_location='cpu'))
 
         #if downsample == 4:
         #    self.feature = nn.Sequential(model.features[:14])

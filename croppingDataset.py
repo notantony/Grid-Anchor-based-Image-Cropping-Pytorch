@@ -96,6 +96,8 @@ class GAICD(data.Dataset):
 
 
 class TransformFunctionTest(object):
+    def __init__(self, aspect_ratio=3.0/4.0):
+        self.aspect_ratio = aspect_ratio
 
     def __call__(self, image, image_size):
 
@@ -112,7 +114,8 @@ class TransformFunctionTest(object):
         scale_height = image.shape[0] / float(resized_image.shape[0])
         scale_width = image.shape[1] / float(resized_image.shape[1])
 
-        bboxes = generate_bboxes(resized_image)
+        # bboxes = generate_bboxes(resized_image)
+        bboxes = generate_bboxes_custom(resized_image, self.aspect_ratio)
 
         transformed_bbox = {}
         transformed_bbox['xmin'] = []
@@ -129,7 +132,53 @@ class TransformFunctionTest(object):
             transformed_bbox['ymax'].append(bbox[2])
 
         resized_image = resized_image.transpose((2, 0, 1))
-        return resized_image,transformed_bbox,source_bboxes
+        return resized_image, transformed_bbox, source_bboxes
+
+
+def tiling_range(start, end, step, width):
+    if step == 0:
+        if start + width <= end:
+            yield start
+        return
+    while start + width <= end:
+        yield start
+        start += step
+    if start + width != end + step:
+        yield end - width
+
+
+def generate_bboxes_custom(image, wh_ratio, n_samples=16):
+    fragments = []
+
+    h = float(image.shape[0])
+    w = float(image.shape[1])
+
+    for size in range(n_samples, n_samples // 2 - 1, -1):
+        steps = n_samples - size + 1
+        size = float(size)
+
+        if wh_ratio > w / h:
+            w_sample = size / float(n_samples) * w
+            h_sample = w_sample / wh_ratio
+            w_step = w * (1.0 / (size + 1.0))
+            h_step = w_step * (h_sample / w_sample)
+        else:
+            h_sample = size / float(n_samples) * h
+            w_sample = h_sample * wh_ratio
+            h_step = h * (1.0 / (size + 1.0))
+            w_step = h_step * (w_sample / h_sample)
+
+        x_range = list(tiling_range(0.0, w, w_step, w_sample))
+        y_range = list(tiling_range(0.0, h, h_step, h_sample))
+
+        for x_start in x_range:
+            for y_start in y_range:
+                x_end = x_start + w_sample
+                y_end = y_start + h_sample
+                fragments.append([y_start, x_start, y_end, x_end])
+                assert x_end <= w and y_end <= h
+    
+    return fragments
 
 
 def generate_bboxes(image):
@@ -199,7 +248,7 @@ def generate_bboxes_1_1(image):
 
 class setup_test_dataset(data.Dataset):
 
-    def __init__(self, image_size=256.0,dataset_dir='testsetDir', transform=TransformFunctionTest()):
+    def __init__(self, image_size=256.0, dataset_dir='testsetDir', transform=TransformFunctionTest()):
         self.image_size = float(image_size)
         self.dataset_dir = dataset_dir
         image_lists = os.listdir(self.dataset_dir)
@@ -225,4 +274,33 @@ class setup_test_dataset(data.Dataset):
 
     def __len__(self):
         return len(self._imgpath)
+
+
+class SingleImageDatataset(data.Dataset):
+    def __init__(self, image_path, transform=TransformFunctionTest(), image_size=256.0):
+        self.image_size = float(image_size)
+        self._imgpath = image_path
+        self.transform = transform
+
+
+    def __getitem__(self, idx):
+        image = cv2.imread(self._imgpath)
+
+        # to rgb
+        image = image[:, :, (2, 1, 0)]
+
+        if self.transform:
+            resized_image, transformed_bbox, source_bboxes = self.transform(image, self.image_size)
+
+        sample = {
+            'image': image,
+            'resized_image': resized_image,
+            'tbboxes': transformed_bbox,
+            'sourceboxes': source_bboxes
+        }
+
+        return sample
+
+    def __len__(self):
+        return 1
 
