@@ -99,7 +99,7 @@ class TransformFunctionTest(object):
     def __init__(self, aspect_ratio=3.0/4.0):
         self.aspect_ratio = aspect_ratio
 
-    def __call__(self, image, image_size):
+    def __call__(self, image, image_size, bboxes=None):
 
         scale = image_size / min(image.shape[:2])
         h = round(image.shape[0] * scale / 32.0) * 32
@@ -114,25 +114,19 @@ class TransformFunctionTest(object):
         scale_height = image.shape[0] / float(resized_image.shape[0])
         scale_width = image.shape[1] / float(resized_image.shape[1])
 
-        # bboxes = generate_bboxes(resized_image)
-        bboxes = generate_bboxes_custom(resized_image, self.aspect_ratio)
+        if bboxes is None:
+            bboxes = generate_bboxes_custom(resized_image, self.aspect_ratio)
 
-        transformed_bbox = {}
-        transformed_bbox['xmin'] = []
-        transformed_bbox['ymin'] = []
-        transformed_bbox['xmax'] = []
-        transformed_bbox['ymax'] = []
-        source_bboxes = list()
+        transformed_bboxes = []
+        source_bboxes = []
 
         for bbox in bboxes:
-            source_bboxes.append([round(bbox[0] * scale_height),round(bbox[1] * scale_width),round(bbox[2] * scale_height),round(bbox[3] * scale_width)])
-            transformed_bbox['xmin'].append(bbox[1])
-            transformed_bbox['ymin'].append(bbox[0])
-            transformed_bbox['xmax'].append(bbox[3])
-            transformed_bbox['ymax'].append(bbox[2])
+            source_bboxes.append([round(bbox[0] * scale_width), round(bbox[1] * scale_height), \
+                    round(bbox[2] * scale_width), round(bbox[3] * scale_height)])
+            transformed_bboxes.append((0, bbox[0], bbox[1], bbox[2], bbox[3]))
 
         resized_image = resized_image.transpose((2, 0, 1))
-        return resized_image, transformed_bbox, source_bboxes
+        return resized_image, transformed_bboxes, source_bboxes
 
 
 def tiling_range(start, end, step, width):
@@ -175,76 +169,11 @@ def generate_bboxes_custom(image, wh_ratio, n_samples=16):
             for y_start in y_range:
                 x_end = x_start + w_sample
                 y_end = y_start + h_sample
-                fragments.append([y_start, x_start, y_end, x_end])
+                fragments.append([x_start, y_start, x_end, y_end])
                 assert x_end <= w and y_end <= h
     
     return fragments
 
-
-def generate_bboxes(image):
-
-    bins = 12.0
-    h = image.shape[0]
-    w = image.shape[1]
-    step_h = h / bins
-    step_w = w / bins
-    annotations = list()
-    for x1 in range(0,4):
-        for y1 in range(0,4):
-            for x2 in range(8,12):
-                for y2 in range(8,12):
-                    if (x2-x1)*(y2-y1)>0.4999*bins*bins and (y2-y1)*step_w/(x2-x1)/step_h>0.5 and (y2-y1)*step_w/(x2-x1)/step_h<2.0:
-                        annotations.append([float(step_h*(0.5+x1)),float(step_w*(0.5+y1)),float(step_h*(0.5+x2)),float(step_w*(0.5+y2))])
-
-    return annotations
-
-def generate_bboxes_16_9(image):
-
-    h = image.shape[0]
-    w = image.shape[1]
-    h_step = 9
-    w_step = 16
-    annotations = list()
-    for i in range(14,30):
-        out_h = h_step*i
-        out_w = w_step*i
-        if out_h < h and out_w < w and out_h*out_w>0.4*h*w:
-            for w_start in range(0,w-out_w,w_step):
-                for h_start in range(0,h-out_h,h_step):
-                    annotations.append([float(h_start),float(w_start),float(h_start+out_h-1),float(w_start+out_w-1)])
-    return annotations
-
-def generate_bboxes_4_3(image):
-
-    h = image.shape[0]
-    w = image.shape[1]
-    h_step = 12
-    w_step = 16
-    annotations = list()
-    for i in range(14,30):
-        out_h = h_step*i
-        out_w = w_step*i
-        if out_h < h and out_w < w and out_h*out_w>0.4*h*w:
-            for w_start in range(0,w-out_w,w_step):
-                for h_start in range(0,h-out_h,h_step):
-                    annotations.append([float(h_start),float(w_start),float(h_start+out_h-1),float(w_start+out_w-1)])
-    return annotations
-
-def generate_bboxes_1_1(image):
-
-    h = image.shape[0]
-    w = image.shape[1]
-    h_step = 12
-    w_step = 12
-    annotations = list()
-    for i in range(14,30):
-        out_h = h_step*i
-        out_w = w_step*i
-        if out_h < h and out_w < w and out_h*out_w>0.4*h*w:
-            for w_start in range(0,w-out_w,w_step):
-                for h_start in range(0,h-out_h,h_step):
-                    annotations.append([float(h_start),float(w_start),float(h_start+out_h-1),float(w_start+out_w-1)])
-    return annotations
 
 class setup_test_dataset(data.Dataset):
 
@@ -255,7 +184,7 @@ class setup_test_dataset(data.Dataset):
         self._imgpath = list()
         self._annopath = list()
         for image in image_lists:
-          self._imgpath.append(os.path.join(self.dataset_dir, image))
+            self._imgpath.append(os.path.join(self.dataset_dir, image))
         self.transform = transform
 
 
@@ -268,7 +197,7 @@ class setup_test_dataset(data.Dataset):
         if self.transform:
             resized_image,transformed_bbox,source_bboxes = self.transform(image,self.image_size)
 
-        sample = {'imgpath': self._imgpath[idx], 'image': image, 'resized_image': resized_image, 'tbboxes':transformed_bbox , 'sourceboxes': source_bboxes}
+        sample = {'imgpath': self._imgpath[idx], 'image': image, 'resized_image': resized_image, 'tbboxes': transformed_bbox, 'sourceboxes': source_bboxes}
 
         return sample
 
@@ -276,7 +205,7 @@ class setup_test_dataset(data.Dataset):
         return len(self._imgpath)
 
 
-class SingleImageDatataset(data.Dataset):
+class SingleImageDataset(data.Dataset):
     def __init__(self, image_path, transform=TransformFunctionTest(), image_size=256.0):
         self.image_size = float(image_size)
         self._imgpath = image_path
@@ -303,4 +232,3 @@ class SingleImageDatataset(data.Dataset):
 
     def __len__(self):
         return 1
-

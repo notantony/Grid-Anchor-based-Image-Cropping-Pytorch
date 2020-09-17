@@ -1,0 +1,6 @@
+flask
+python==2.7
+pytorch==0.4.1
+numpy
+cv2
+scipy
